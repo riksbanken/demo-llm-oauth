@@ -14,7 +14,8 @@ The deployment creates:
 - an NSG allowing inbound TCP 80 and 443 only;
 - Caddy for automatic HTTPS and reverse proxying;
 - an Azure Key Vault read by the VM's managed identity;
-- a regional Azure OpenAI `gpt-4.1-mini` deployment at 10K TPM; and
+- a regional Azure OpenAI `gpt-4.1-mini` deployment at 10K TPM, consumed through
+  Azure's OpenAI-compatible `/openai/v1` endpoint; and
 - GitHub Actions deployment through Entra workload identity federation.
 
 No VM password, SSH private key, Azure client secret, or Azure OpenAI key is
