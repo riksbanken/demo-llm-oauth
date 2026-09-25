@@ -26,7 +26,7 @@ jobs:
     environment: poc
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate deployment sources
         run: ./deploy/azure/validate.sh

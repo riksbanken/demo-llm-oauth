@@ -26,13 +26,13 @@ param webuiSecretKey string
 param vmSize string = 'Standard_B2s'
 
 @description('Azure OpenAI deployment name used as the upstream model identifier.')
-param modelDeploymentName string = 'gpt-4o-mini'
+param modelDeploymentName string = 'gpt-4.1-mini'
 
 @description('Azure OpenAI model name.')
-param modelName string = 'gpt-4o-mini'
+param modelName string = 'gpt-4.1-mini'
 
 @description('Pinned Azure OpenAI model version.')
-param modelVersion string = '2024-07-18'
+param modelVersion string = '2025-04-14'
 
 @description('Regional Azure OpenAI deployment SKU. Keep Standard for regional processing.')
 param modelSkuName string = 'Standard'
@@ -44,6 +44,10 @@ param modelCapacity int = 10
 var safePrefix = toLower(dnsLabel)
 var uniqueSuffix = uniqueString(subscription().id, resourceGroup().id, safePrefix)
 var publicIpName = '${safePrefix}-pip'
+var loadBalancerName = '${safePrefix}-lb'
+var loadBalancerFrontendName = 'public-frontend'
+var loadBalancerBackendPoolName = 'compose-vm'
+var loadBalancerProbeName = 'https-probe'
 var networkSecurityGroupName = '${safePrefix}-nsg'
 var virtualNetworkName = '${safePrefix}-vnet'
 var subnetName = 'default'
@@ -86,6 +90,111 @@ resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   }
 }
 
+resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
+  name: loadBalancerName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Public HTTPS entry point and explicit outbound SNAT for the private Compose VM'
+  })
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    frontendIPConfigurations: [
+      {
+        name: loadBalancerFrontendName
+        properties: {
+          publicIPAddress: {
+            id: publicIp.id
+          }
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: loadBalancerBackendPoolName
+      }
+    ]
+    probes: [
+      {
+        name: loadBalancerProbeName
+        properties: {
+          protocol: 'Tcp'
+          port: 443
+          intervalInSeconds: 5
+          numberOfProbes: 2
+        }
+      }
+    ]
+    loadBalancingRules: [
+      {
+        name: 'http'
+        properties: {
+          protocol: 'Tcp'
+          frontendPort: 80
+          backendPort: 80
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerFrontendName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+          }
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+          }
+          disableOutboundSnat: true
+          enableFloatingIP: false
+          enableTcpReset: true
+          idleTimeoutInMinutes: 4
+          loadDistribution: 'Default'
+        }
+      }
+      {
+        name: 'https'
+        properties: {
+          protocol: 'Tcp'
+          frontendPort: 443
+          backendPort: 443
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerFrontendName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+          }
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+          }
+          disableOutboundSnat: true
+          enableFloatingIP: false
+          enableTcpReset: true
+          idleTimeoutInMinutes: 30
+          loadDistribution: 'Default'
+        }
+      }
+    ]
+    outboundRules: [
+      {
+        name: 'internet-egress'
+        properties: {
+          protocol: 'All'
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+          }
+          frontendIPConfigurations: [
+            {
+              id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerFrontendName)
+            }
+          ]
+          allocatedOutboundPorts: 1024
+          idleTimeoutInMinutes: 15
+          enableTcpReset: true
+        }
+      }
+    ]
+  }
+}
+
 resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   name: networkSecurityGroupName
   location: location
@@ -120,6 +229,19 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-0
           destinationAddressPrefix: '*'
         }
       }
+      {
+        name: 'Allow-Load-Balancer-Probe'
+        properties: {
+          priority: 120
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          destinationAddressPrefix: '*'
+        }
+      }
     ]
   }
 }
@@ -141,6 +263,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         name: subnetName
         properties: {
           addressPrefix: '10.42.0.0/24'
+          defaultOutboundAccess: false
           networkSecurityGroup: {
             id: networkSecurityGroup.id
           }
@@ -154,8 +277,11 @@ resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   name: networkInterfaceName
   location: location
   tags: union(commonTags, {
-    Description: 'Connects the Compose VM to its private network and static public IP'
+    Description: 'Connects the private Compose VM to the Standard Load Balancer backend pool'
   })
+  dependsOn: [
+    loadBalancer
+  ]
   properties: {
     ipConfigurations: [
       {
@@ -166,9 +292,11 @@ resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
           subnet: {
             id: resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetwork.name, subnetName)
           }
-          publicIPAddress: {
-            id: publicIp.id
-          }
+          loadBalancerBackendAddressPools: [
+            {
+              id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+            }
+          ]
         }
       }
     ]
