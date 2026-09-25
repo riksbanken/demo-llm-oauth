@@ -62,8 +62,8 @@ var loadBalancerName = '${safePrefix}-lb'
 var loadBalancerFrontendName = 'public-frontend'
 var loadBalancerUiFrontendName = 'ui-frontend'
 var loadBalancerBackendPoolName = 'compose-vm'
-var loadBalancerUiBackendPoolName = 'compose-vm-ui'
 var loadBalancerProbeName = 'http-probe'
+var loadBalancerUiProbeName = 'ui-http-probe'
 var networkSecurityGroupName = '${safePrefix}-nsg'
 var virtualNetworkName = '${safePrefix}-vnet'
 var subnetName = 'default'
@@ -158,9 +158,6 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
       {
         name: loadBalancerBackendPoolName
       }
-      {
-        name: loadBalancerUiBackendPoolName
-      }
     ]
     probes: [
       {
@@ -168,6 +165,15 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
         properties: {
           protocol: 'Tcp'
           port: 80
+          intervalInSeconds: 5
+          numberOfProbes: 2
+        }
+      }
+      {
+        name: loadBalancerUiProbeName
+        properties: {
+          protocol: 'Tcp'
+          port: 8081
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -223,15 +229,15 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
         properties: {
           protocol: 'Tcp'
           frontendPort: 80
-          backendPort: 80
+          backendPort: 8081
           frontendIPConfiguration: {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
           }
           backendAddressPool: {
-            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
           }
           probe: {
-            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerUiProbeName)
           }
           disableOutboundSnat: true
           enableFloatingIP: false
@@ -245,15 +251,15 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
         properties: {
           protocol: 'Tcp'
           frontendPort: 443
-          backendPort: 443
+          backendPort: 8443
           frontendIPConfiguration: {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
           }
           backendAddressPool: {
-            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
           }
           probe: {
-            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerUiProbeName)
           }
           disableOutboundSnat: true
           enableFloatingIP: false
@@ -332,6 +338,45 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-0
           destinationAddressPrefix: '*'
         }
       }
+      {
+        name: 'Allow-UI-HTTP-Backend'
+        properties: {
+          priority: 130
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '8081'
+          sourceAddressPrefix: 'Internet'
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'Allow-UI-HTTPS-Backend'
+        properties: {
+          priority: 140
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '8443'
+          sourceAddressPrefix: 'Internet'
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'Allow-UI-Load-Balancer-Probe'
+        properties: {
+          priority: 150
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '8081'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          destinationAddressPrefix: '*'
+        }
+      }
     ]
   }
 }
@@ -385,9 +430,6 @@ resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
           loadBalancerBackendAddressPools: [
             {
               id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
-            }
-            {
-              id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
             }
           ]
         }

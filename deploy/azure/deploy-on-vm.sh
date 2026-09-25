@@ -220,7 +220,7 @@ done
 if [[ "$healthy" != true ]]; then
   printf 'Open WebUI did not become healthy.\n' >&2
   compose_in "$release_dir" ps >&2 || true
-  compose_in "$release_dir" logs --tail 100 openwebui agentgateway caddy >&2 || true
+  compose_in "$release_dir" logs --tail 100 openwebui agentgateway caddy caddy-ui >&2 || true
   rollback
   exit 1
 fi

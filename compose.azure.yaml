@@ -33,6 +33,21 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
+  caddy-ui:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - agentgateway
+    ports:
+      - "8081:80"
+      - "8443:443"
+    configs:
+      - source: caddy-ui
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy-ui-data:/data
+      - caddy-ui-config:/config
+
 configs:
   agentgateway:
     content: |
@@ -87,6 +102,8 @@ configs:
         reverse_proxy openwebui:8080
       }
 
+  caddy-ui:
+    content: |
       ${AGENTGATEWAY_UI_HOSTNAME:?Set AGENTGATEWAY_UI_HOSTNAME} {
         encode zstd gzip
         reverse_proxy agentgateway:4001
@@ -95,3 +112,5 @@ configs:
 volumes:
   caddy-data:
   caddy-config:
+  caddy-ui-data:
+  caddy-ui-config:
