@@ -197,8 +197,10 @@ Run **Deploy Azure POC** from the GitHub Actions UI. The workflow:
 6. starts the stack and verifies local health; and
 7. waits for Caddy to issue a certificate and verifies public HTTPS health.
 
-After initial setup, relevant pushes to `main` redeploy automatically. Only one
-POC deployment runs at a time.
+Merges and pushes to `main` run validation only; they never deploy the POC.
+Deployment occurs only through a manual **Deploy Azure POC** run or through
+**Manage Azure POC → start**, which dispatches that deployment workflow. Only
+one POC deployment or management operation runs at a time.
 
 Open the Open WebUI URL reported in the workflow summary, sign in through
 Entra, select `llm`, and send a message. Open the Agentgateway UI URL and verify
