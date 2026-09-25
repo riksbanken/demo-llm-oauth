@@ -193,8 +193,9 @@ required. Both browser applications use Entra SSO.
 
 See [`deploy/azure/README.md`](deploy/azure/README.md) for the complete Azure,
 GitHub, Entra, deployment, verification, cost-control, rotation, and teardown
-procedure. A scheduled GitHub workflow deallocates the POC VM after the workday
-while preserving its disk and application data.
+procedure. A scheduled GitHub workflow deallocates the POC VM and removes the
+Load Balancer after the workday while preserving the administrator-approved
+identity/RBAC setup, stable hostnames, secrets, model deployment, and disk.
 
 ## Validation and sources
 

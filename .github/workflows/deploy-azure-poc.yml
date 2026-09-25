@@ -9,7 +9,10 @@ on:
       - compose.yaml
       - compose.production.yaml
       - compose.azure.yaml
-      - deploy/azure/**
+      - deploy/azure/main.bicep
+      - deploy/azure/cloud-init.yaml
+      - deploy/azure/deploy-on-vm.sh
+      - deploy/azure/validate.sh
       - .github/workflows/deploy-azure-poc.yml
 
 permissions:

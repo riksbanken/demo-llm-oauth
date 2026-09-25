@@ -21,6 +21,7 @@ on:
       timezone: Europe/Stockholm
 
 permissions:
+  actions: write
   contents: read
   id-token: write
 
@@ -38,6 +39,7 @@ jobs:
       PUBLIC_URL: https://${{ vars.AZURE_DNS_LABEL }}.${{ vars.AZURE_LOCATION }}.cloudapp.azure.com
       UI_PUBLIC_URL: https://${{ vars.AZURE_UI_DNS_LABEL }}.${{ vars.AZURE_LOCATION }}.cloudapp.azure.com
       REQUESTED_ACTION: ${{ github.event_name == 'schedule' && 'stop' || inputs.action }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -49,7 +51,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Start, stop, or inspect the POC VM
+      - name: Start, stop, or inspect the POC runtime
         run: |
           set -euo pipefail
           : "${AZURE_RESOURCE_GROUP:?Missing AZURE_RESOURCE_GROUP}"
@@ -57,12 +59,23 @@ jobs:
           : "${REQUESTED_ACTION:?Missing action}"
 
           vm_name="${AZURE_DNS_LABEL}-vm"
-          if ! az vm show --resource-group "$AZURE_RESOURCE_GROUP" --name "$vm_name" --output none 2>/dev/null; then
-            echo "POC VM $vm_name does not exist; nothing to manage." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+          load_balancer_name="${AZURE_DNS_LABEL}-lb"
+
+          vm_exists=false
+          if az vm show --resource-group "$AZURE_RESOURCE_GROUP" --name "$vm_name" --output none 2>/dev/null; then
+            vm_exists=true
+          fi
+
+          load_balancer_exists=false
+          if az network lb show --resource-group "$AZURE_RESOURCE_GROUP" --name "$load_balancer_name" --output none 2>/dev/null; then
+            load_balancer_exists=true
           fi
 
           power_state() {
+            if [[ "$vm_exists" != true ]]; then
+              printf 'VM absent\n'
+              return
+            fi
             az vm get-instance-view \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$vm_name" \
@@ -73,36 +86,25 @@ jobs:
           before=$(power_state)
           case "$REQUESTED_ACTION" in
             start)
-              if [[ "$before" != 'VM running' ]]; then
-                az vm start --resource-group "$AZURE_RESOURCE_GROUP" --name "$vm_name" --output none
-              fi
-
-              curl \
-                --fail \
-                --show-error \
-                --silent \
-                --retry 60 \
-                --retry-delay 5 \
-                --retry-all-errors \
-                --max-time 10 \
-                "$PUBLIC_URL/health" >/dev/null
-
-              headers=$(mktemp)
-              curl \
-                --show-error \
-                --silent \
-                --retry 30 \
-                --retry-delay 5 \
-                --retry-all-errors \
-                --max-time 10 \
-                --output /dev/null \
-                --dump-header "$headers" \
-                "$UI_PUBLIC_URL/ui"
-              grep --ignore-case --extended-regexp '^location: https://login\.microsoftonline\.com/' "$headers"
+              gh workflow run deploy-azure-poc.yml --ref main
+              {
+                echo '## Azure POC management'
+                echo
+                echo '- Requested action: start'
+                echo '- Full deployment workflow dispatched.'
+                echo '- It will recreate the Load Balancer, start the VM, and verify both endpoints.'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
               ;;
             stop)
-              if [[ "$before" != 'VM deallocated' ]]; then
+              if [[ "$vm_exists" == true && "$before" != 'VM deallocated' ]]; then
                 az vm deallocate --resource-group "$AZURE_RESOURCE_GROUP" --name "$vm_name" --output none
+              fi
+              if [[ "$load_balancer_exists" == true ]]; then
+                az network lb delete \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --name "$load_balancer_name"
+                load_balancer_exists=false
               fi
               ;;
             status)
@@ -114,6 +116,12 @@ jobs:
           esac
 
           after=$(power_state)
+          if az network lb show --resource-group "$AZURE_RESOURCE_GROUP" --name "$load_balancer_name" --output none 2>/dev/null; then
+            load_balancer_status='present'
+          else
+            load_balancer_status='absent'
+          fi
+
           {
             echo '## Azure POC management'
             echo
@@ -121,8 +129,6 @@ jobs:
             echo "- VM: $vm_name"
             echo "- Before: $before"
             echo "- After: $after"
-            if [[ "$REQUESTED_ACTION" == 'start' ]]; then
-              echo "- Open WebUI: $PUBLIC_URL"
-              echo "- Agentgateway UI: $UI_PUBLIC_URL/ui"
-            fi
+            echo "- Load Balancer: $load_balancer_status"
+            echo '- Retained: resource group/RBAC, Entra applications and consent, public IP hostnames, Key Vault, Azure OpenAI, VNet, NSG, VM disk.'
           } >> "$GITHUB_STEP_SUMMARY"
