@@ -1,0 +1,21 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose, shell, and Bicep
+        run: ./deploy/azure/validate.sh

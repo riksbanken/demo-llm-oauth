@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+cloud-init.rendered.yaml
+deploy/azure/generated/
+deploy/azure/*.parameters.json
+__pycache__/

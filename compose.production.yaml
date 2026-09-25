@@ -1,0 +1,7 @@
+services:
+  openwebui:
+    environment:
+      WEBUI_URL: "${WEBUI_URL:?Set WEBUI_URL to the public HTTPS origin}"
+      OPENID_REDIRECT_URI: "${WEBUI_URL:?Set WEBUI_URL to the public HTTPS origin}/oauth/oidc/callback"
+      WEBUI_SESSION_COOKIE_SECURE: "true"
+      WEBUI_AUTH_COOKIE_SECURE: "true"
