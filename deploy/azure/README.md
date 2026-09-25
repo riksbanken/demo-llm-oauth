@@ -8,11 +8,13 @@ translation, and keeps operational complexity low.
 The deployment creates:
 
 - one Ubuntu 24.04 `Standard_B2s` VM in Sweden Central;
-- a static public IP and `<label>.swedencentral.cloudapp.azure.com` hostname;
+- a Standard public Load Balancer with a static public IP and
+  `<label>.swedencentral.cloudapp.azure.com` hostname;
+- a private-only VM NIC behind the Load Balancer;
 - an NSG allowing inbound TCP 80 and 443 only;
 - Caddy for automatic HTTPS and reverse proxying;
 - an Azure Key Vault read by the VM's managed identity;
-- a regional Azure OpenAI `gpt-4o-mini` deployment at 10K TPM; and
+- a regional Azure OpenAI `gpt-4.1-mini` deployment at 10K TPM; and
 - GitHub Actions deployment through Entra workload identity federation.
 
 No VM password, SSH private key, Azure client secret, or Azure OpenAI key is
@@ -29,7 +31,7 @@ You need:
 
 - an Azure subscription with permission to create resource groups, app
   registrations, role assignments, and the resources in `main.bicep`;
-- Azure OpenAI access and at least 10K TPM of regional `gpt-4o-mini` Standard
+- Azure OpenAI access and at least 10K TPM of regional `gpt-4.1-mini` Standard
   quota in Sweden Central;
 - an Entra administrator able to create applications and grant tenant-wide
   admin consent in the same tenant as the selected Azure subscription;
@@ -188,13 +190,18 @@ before teardown if conversations or accounts must be retained.
 
 ## Security boundaries
 
-- The NSG exposes only TCP 80 and 443.
+- The Standard Load Balancer owns the public IP and forwards only TCP 80 and
+  443 to the VM's private NIC.
+- The Load Balancer also provides explicit outbound SNAT through the same
+  static IP; no public IP is attached to the VM NIC.
+- The NSG exposes only TCP 80 and 443 and permits the Load Balancer health
+  probe on 443.
 - Caddy is the only public container.
 - Open WebUI and Agentgateway host ports remain bound to loopback.
 - Agentgateway validates tenant, issuer, audience, expiry, and `llm.invoke` on
   every inference request.
-- The Azure OpenAI public endpoint accepts traffic only from the VM's static
-  public IP.
+- The Azure OpenAI public endpoint accepts traffic only from the Load
+  Balancer's static outbound public IP.
 - The VM managed identity can read, but not manage, the three Key Vault
   secrets.
 - GitHub's deployment identity is scoped to the POC resource group.
