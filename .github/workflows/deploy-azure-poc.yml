@@ -92,6 +92,24 @@ jobs:
           echo "openai_endpoint=$(jq -r '.openAiEndpoint.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "model_deployment_name=$(jq -r '.modelDeploymentName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure the POC VM is running
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ steps.infrastructure.outputs.vm_name }}
+        run: |
+          set -euo pipefail
+          state=$(az vm get-instance-view \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --query "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus | [0]" \
+            --output tsv)
+          if [[ "$state" != 'VM running' ]]; then
+            az vm start \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$VM_NAME" \
+              --output none
+          fi
+
       - name: Deploy Compose stack through VM Run Command
         env:
           AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}

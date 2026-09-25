@@ -192,7 +192,9 @@ plus Azure VM Run Command so no public SSH port or Azure client secret is
 required. Both browser applications use Entra SSO.
 
 See [`deploy/azure/README.md`](deploy/azure/README.md) for the complete Azure,
-GitHub, Entra, deployment, verification, rotation, and teardown procedure.
+GitHub, Entra, deployment, verification, cost-control, rotation, and teardown
+procedure. A scheduled GitHub workflow deallocates the POC VM after the workday
+while preserving its disk and application data.
 
 ## Validation and sources
 

@@ -311,6 +311,47 @@ Common failures:
 - **Caddy certificate failure:** verify public DNS, NSG ports 80/443, and ACME
   logs with `docker compose logs caddy` through Run Command.
 
+## Cost controls
+
+The main idle cost is the `Standard_B2s` VM. The repository includes
+`.github/workflows/manage-azure-poc.yml`, which deallocates the VM every day at
+18:07 Stockholm time and runs a second safety shutdown at 23:37. The schedule
+uses `Europe/Stockholm`, so daylight-saving changes are automatic. Both the
+management and deployment workflows share the same concurrency group, so a
+scheduled shutdown cannot interrupt an active deployment.
+
+Deallocation stops CPU/RAM billing but preserves the VM, Docker data, SQLite
+databases, certificates, and hostnames. These resources still have independent
+idle costs:
+
+| Resource | Cost while VM is deallocated |
+| --- | --- |
+| 64 GiB Standard SSD OS disk | Continues to incur storage cost |
+| Two Standard public IPs | Continue to incur hourly IP cost |
+| Standard Load Balancer | Configured rules continue to incur the applicable hourly cost |
+| Key Vault | No meaningful idle compute charge; operations are billed |
+| Azure OpenAI Standard deployment | Pay-per-token; no inference charge while unused |
+| VNet, NIC, and NSG | No direct hourly compute charge |
+| Bandwidth | Charged only when traffic is transferred |
+
+Use the **Manage Azure POC** workflow for manual control, or run:
+
+```bash
+gh workflow run manage-azure-poc.yml -f action=start
+gh workflow run manage-azure-poc.yml -f action=status
+gh workflow run manage-azure-poc.yml -f action=stop
+```
+
+`stop` uses Azure **deallocate**, not a guest operating-system shutdown. A VM
+that is merely stopped but still allocated continues to incur compute charges.
+`start` waits for both public endpoints to become healthy. Running the normal
+deployment workflow also starts a deallocated VM before applying Compose.
+
+GitHub notes that scheduled workflows can be delayed under load. The later
+safety run reduces the chance that the VM remains allocated overnight. For zero
+idle infrastructure cost, delete the resource group using the teardown process;
+that also removes the persistent application data unless it is backed up first.
+
 ## Rotate Open WebUI secrets
 
 Create a new base64url-safe client secret, add it to the existing Open WebUI
