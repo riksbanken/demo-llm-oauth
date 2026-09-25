@@ -1,4 +1,8 @@
 services:
+  agentgateway:
+    environment:
+      OIDC_COOKIE_SECRET: "${AGENTGATEWAY_UI_COOKIE_SECRET:?Set AGENTGATEWAY_UI_COOKIE_SECRET}"
+
   openwebui:
     healthcheck:
       test:
@@ -30,11 +34,62 @@ services:
       - caddy-config:/config
 
 configs:
+  agentgateway:
+    content: |
+      config:
+        storage:
+          mode: readOnly
+      gateways:
+        ui:
+          port: 4001
+      llm:
+        port: 4000
+        policies:
+          jwtAuth:
+            mode: strict
+            issuer: "https://login.microsoftonline.com/${ENTRA_TENANT_ID:?Set ENTRA_TENANT_ID}/v2.0"
+            audiences:
+              - "${GATEWAY_APP_ID:?Set GATEWAY_APP_ID}"
+            jwks:
+              url: "https://login.microsoftonline.com/${ENTRA_TENANT_ID:?Set ENTRA_TENANT_ID}/discovery/v2.0/keys"
+          authorization:
+            rules:
+              - allow: 'has(jwt.scp) && "llm.invoke" in jwt.scp.split(" ")'
+        models:
+          - name: llm
+            provider: "${UPSTREAM_PROVIDER:?Set UPSTREAM_PROVIDER}"
+            requestHeaders:
+              remove: [cookie]
+            params:
+              model: "${UPSTREAM_MODEL:?Set UPSTREAM_MODEL}"
+              baseUrl: "${UPSTREAM_BASE_URL:?Set UPSTREAM_BASE_URL}"
+              apiKey: "${UPSTREAM_API_KEY:?Set UPSTREAM_API_KEY}"
+              azureResourceName: "${AZURE_RESOURCE_NAME:-}"
+              azureResourceType: "${AZURE_RESOURCE_TYPE:-openAI}"
+              azureApiVersion: "${AZURE_API_VERSION:-}"
+      ui:
+        gateways:
+          - ui
+        policies:
+          oidc:
+            issuer: "https://login.microsoftonline.com/${ENTRA_TENANT_ID:?Set ENTRA_TENANT_ID}/v2.0"
+            clientId: "${AGENTGATEWAY_UI_CLIENT_ID:?Set AGENTGATEWAY_UI_CLIENT_ID}"
+            clientSecret: "${AGENTGATEWAY_UI_CLIENT_SECRET:?Set AGENTGATEWAY_UI_CLIENT_SECRET}"
+            redirectURI: "https://${AGENTGATEWAY_UI_HOSTNAME:?Set AGENTGATEWAY_UI_HOSTNAME}/oauth/callback"
+            scopes:
+              - profile
+              - email
+
   caddy:
     content: |
       ${PUBLIC_HOSTNAME:?Set PUBLIC_HOSTNAME to the public DNS hostname} {
         encode zstd gzip
         reverse_proxy openwebui:8080
+      }
+
+      ${AGENTGATEWAY_UI_HOSTNAME:?Set AGENTGATEWAY_UI_HOSTNAME} {
+        encode zstd gzip
+        reverse_proxy agentgateway:4001
       }
 
 volumes:

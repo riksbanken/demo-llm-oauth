@@ -174,9 +174,10 @@ Use HTTPS for that hop too if it crosses a host or other untrusted network.
 
 The repository includes a GitHub Actions deployment to an Azure Linux VM. It
 provisions a regional Azure OpenAI `gpt-4.1-mini` deployment, preserves the
-Compose/SQLite behavior on the VM disk, exposes Open WebUI through Caddy HTTPS,
-and uses GitHub OIDC plus Azure VM Run Command so no public SSH port or Azure
-client secret is required.
+Compose/SQLite behavior on the VM disk, exposes Open WebUI and a separate
+read-only Agentgateway management UI through Caddy HTTPS, and uses GitHub OIDC
+plus Azure VM Run Command so no public SSH port or Azure client secret is
+required. Both browser applications use Entra SSO.
 
 See [`deploy/azure/README.md`](deploy/azure/README.md) for the complete Azure,
 GitHub, Entra, deployment, verification, rotation, and teardown procedure.

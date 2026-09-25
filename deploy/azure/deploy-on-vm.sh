@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 10 ]]; then
-  printf 'Expected 10 positional deployment parameters, received %s.\n' "$#" >&2
+if [[ $# -ne 12 ]]; then
+  printf 'Expected 12 positional deployment parameters, received %s.\n' "$#" >&2
   exit 2
 fi
 
@@ -16,6 +16,8 @@ webui_client_id=$7
 upstream_model=$8
 upstream_base_url=${9%/}
 azure_resource_name=${10}
+agentgateway_ui_hostname=${11}
+agentgateway_ui_client_id=${12}
 
 require_value() {
   local name=$1
@@ -36,6 +38,8 @@ require_value webuiClientId "$webui_client_id"
 require_value upstreamModel "$upstream_model"
 require_value upstreamBaseUrl "$upstream_base_url"
 require_value azureResourceName "$azure_resource_name"
+require_value agentgatewayUiHostname "$agentgateway_ui_hostname"
+require_value agentgatewayUiClientId "$agentgateway_ui_client_id"
 
 if [[ ! "$release_id" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
   printf 'releaseId must be a Git commit SHA.\n' >&2
@@ -132,6 +136,8 @@ get_secret() {
 webui_client_secret=$(get_secret webui-client-secret)
 webui_secret_key=$(get_secret webui-secret-key)
 upstream_api_key=$(get_secret azure-openai-api-key)
+agentgateway_ui_client_secret=$(get_secret agentgateway-ui-client-secret)
+agentgateway_ui_cookie_secret=$(get_secret agentgateway-ui-cookie-secret)
 
 assert_single_line() {
   local name=$1
@@ -145,7 +151,9 @@ assert_single_line() {
 for pair in \
   "WEBUI_CLIENT_SECRET:$webui_client_secret" \
   "WEBUI_SECRET_KEY:$webui_secret_key" \
-  "UPSTREAM_API_KEY:$upstream_api_key"; do
+  "UPSTREAM_API_KEY:$upstream_api_key" \
+  "AGENTGATEWAY_UI_CLIENT_SECRET:$agentgateway_ui_client_secret" \
+  "AGENTGATEWAY_UI_COOKIE_SECRET:$agentgateway_ui_cookie_secret"; do
   assert_single_line "${pair%%:*}" "${pair#*:}"
 done
 
@@ -165,6 +173,10 @@ UPSTREAM_API_KEY=$upstream_api_key
 AZURE_RESOURCE_NAME=$azure_resource_name
 AZURE_RESOURCE_TYPE=openAI
 AZURE_API_VERSION=v1
+AGENTGATEWAY_UI_HOSTNAME=$agentgateway_ui_hostname
+AGENTGATEWAY_UI_CLIENT_ID=$agentgateway_ui_client_id
+AGENTGATEWAY_UI_CLIENT_SECRET=$agentgateway_ui_client_secret
+AGENTGATEWAY_UI_COOKIE_SECRET=$agentgateway_ui_cookie_secret
 EOF
 chmod 0600 "$release_dir/.env"
 
