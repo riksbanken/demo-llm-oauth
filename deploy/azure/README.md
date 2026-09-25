@@ -68,8 +68,8 @@ The script:
 3. reserves the static public IP and Azure hostname;
 4. creates the GitHub deployment app/service principal;
 5. grants it Contributor only on the POC resource group; and
-6. creates an OIDC federated credential for
-   `repo:riksbanken/demo-llm-oauth:environment:poc`.
+6. creates an OIDC federated credential using GitHub's immutable organization
+   and repository IDs for the `poc` environment.
 
 It writes non-secret values to
 `deploy/azure/generated/github-bootstrap.env`. The directory is gitignored.
@@ -86,10 +86,6 @@ gh api \
 Then run the commands printed by the script. In the GitHub UI, protect the
 `poc` environment so only `main` can deploy and add a required reviewer if
 appropriate for the POC.
-
-If the organization has enabled GitHub immutable OIDC subjects, replace the
-name-based subject created by the script with the repository's immutable
-subject before running the workflow.
 
 ## 2. Create the Entra SSO registrations
 
