@@ -122,7 +122,10 @@ docker compose ps
 Open `http://localhost:3000`, sign in with Entra, select **llm**, and send a
 message. The gateway maps the stable `llm` alias to `UPSTREAM_MODEL`.
 Sign in yourself first: Open WebUI makes the first account an administrator.
-Subsequent assigned users receive its normal `user` role.
+Subsequent assigned users receive its normal `user` role. Model-level access
+control is bypassed so every authenticated user can see and use the configured
+models; the Entra enterprise-application assignment remains the admission
+boundary for this POC.
 
 The model connection is preconfigured with `auth_type: system_oauth` and a
 static model ID, so no connection edits or model discovery are needed. The
