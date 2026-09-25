@@ -62,6 +62,9 @@ fi
 systemctl is-active --quiet docker
 
 deployment_root=/opt/llm-oauth
+agentgateway_data_dir="$deployment_root/data/agentgateway"
+install -d -o 65532 -g 65532 -m 0750 "$agentgateway_data_dir"
+chown -R 65532:65532 "$agentgateway_data_dir"
 release_dir="$deployment_root/releases/$release_id"
 current_link="$deployment_root/current"
 previous_release=''
@@ -177,6 +180,7 @@ AGENTGATEWAY_UI_HOSTNAME=$agentgateway_ui_hostname
 AGENTGATEWAY_UI_CLIENT_ID=$agentgateway_ui_client_id
 AGENTGATEWAY_UI_CLIENT_SECRET=$agentgateway_ui_client_secret
 AGENTGATEWAY_UI_COOKIE_SECRET=$agentgateway_ui_cookie_secret
+AGENTGATEWAY_DATA_DIR=$agentgateway_data_dir
 EOF
 chmod 0600 "$release_dir/.env"
 

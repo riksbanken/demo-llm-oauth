@@ -2,6 +2,8 @@ services:
   agentgateway:
     environment:
       OIDC_COOKIE_SECRET: "${AGENTGATEWAY_UI_COOKIE_SECRET:?Set AGENTGATEWAY_UI_COOKIE_SECRET}"
+    volumes:
+      - "${AGENTGATEWAY_DATA_DIR:?Set AGENTGATEWAY_DATA_DIR}:/data"
 
   openwebui:
     healthcheck:
@@ -52,8 +54,15 @@ configs:
   agentgateway:
     content: |
       config:
+        database:
+          url: "sqlite:///data/agentgateway.db"
+          maxConnections: 5
         storage:
           mode: readOnly
+      frontendPolicies:
+        accessLog:
+          database:
+            llm: metadata
       gateways:
         ui:
           port: 4001

@@ -130,10 +130,13 @@ Create the dedicated OIDC client after reserving the UI hostname:
 ```
 
 This creates **LLM OAuth POC - Agentgateway UI**, registers the exact
-`/oauth/callback` URI, requires enterprise-application assignment, assigns the
-specified Entra group when permitted, and generates both the client secret and
-the persistent OIDC cookie-encryption secret. Run the printed GitHub variable
-and secret commands immediately.
+`/oauth/callback` URI, requests only the delegated Microsoft Graph `openid`,
+`profile`, and `email` scopes, requires enterprise-application assignment,
+assigns the specified Entra group when permitted, and generates both the client
+secret and the persistent OIDC cookie-encryption secret. If tenant policy blocks
+user consent, an Entra administrator must grant consent using the command
+printed by the script. Run the printed GitHub variable and secret commands
+immediately.
 
 The Agentgateway UI is configured globally read-only because GitHub and Bicep
 own the deployed configuration. The unauthenticated local admin interface on
@@ -208,10 +211,11 @@ releases with the stable Compose project name `llm-oauth`. Docker named volumes
 therefore survive workflow deployments.
 
 A deployment validates Compose before changing containers and recreates the
-three containers so embedded Compose config changes are always applied. Named
-volumes preserve Open WebUI and Caddy state. If Open WebUI does not become
-healthy after an update, the script reapplies the previous release. The newest
-three release directories are retained.
+containers so embedded Compose config changes are always applied. Named volumes
+preserve Open WebUI and Caddy state. Agentgateway request logs are stored in the
+persistent host directory `/opt/llm-oauth/data/agentgateway` as SQLite. If Open
+WebUI does not become healthy after an update, the script reapplies the previous
+release. The newest three release directories are retained.
 
 Open WebUI data is stored on the VM OS disk. It survives container replacement
 and VM reboot, but it is not highly available and is lost if the VM/OS disk or
@@ -229,8 +233,10 @@ before teardown if conversations or accounts must be retained.
 - Caddy is the only public container and separates the two applications by
   hostname.
 - The Agentgateway management UI listener is protected by OIDC and operates in
-  read-only storage mode; the unauthenticated port-15000 admin interface remains
-  loopback-only.
+  read-only configuration mode; the unauthenticated port-15000 admin interface
+  remains loopback-only.
+- Agentgateway stores request metadata, timing, token usage, status, and cost in
+  a local SQLite database. Prompt and completion content is not persisted.
 - Open WebUI and Agentgateway host ports remain bound to loopback.
 - Agentgateway validates tenant, issuer, audience, expiry, and `llm.invoke` on
   every inference request.
