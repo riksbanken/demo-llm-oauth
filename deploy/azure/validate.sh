@@ -15,6 +15,10 @@ export UPSTREAM_API_KEY='validation-api-key'
 export AZURE_RESOURCE_NAME='validation'
 export AZURE_RESOURCE_TYPE='openAI'
 export AZURE_API_VERSION='v1'
+export AGENTGATEWAY_UI_HOSTNAME='validation-agentgateway.swedencentral.cloudapp.azure.com'
+export AGENTGATEWAY_UI_CLIENT_ID='00000000-0000-0000-0000-000000000004'
+export AGENTGATEWAY_UI_CLIENT_SECRET='validation-agentgateway-client-secret'
+export AGENTGATEWAY_UI_COOKIE_SECRET='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
 docker compose \
   --file compose.yaml \

@@ -8,6 +8,11 @@ param location string = resourceGroup().location
 @maxLength(40)
 param dnsLabel string
 
+@description('Unique Azure Public IP DNS label for the Agentgateway management UI.')
+@minLength(3)
+@maxLength(40)
+param uiDnsLabel string
+
 @description('Linux VM administrator username used only for break-glass access.')
 param vmAdminUsername string = 'azureadmin'
 
@@ -21,6 +26,14 @@ param webuiClientSecret string
 @secure()
 @description('Persistent Open WebUI session and OAuth encryption secret.')
 param webuiSecretKey string
+
+@secure()
+@description('Agentgateway UI Entra application client secret.')
+param agentgatewayUiClientSecret string
+
+@secure()
+@description('Persistent Agentgateway OIDC cookie encryption secret.')
+param agentgatewayUiCookieSecret string
 
 @description('VM SKU for the Compose host.')
 param vmSize string = 'Standard_B2s'
@@ -44,8 +57,10 @@ param modelCapacity int = 10
 var safePrefix = toLower(dnsLabel)
 var uniqueSuffix = uniqueString(subscription().id, resourceGroup().id, safePrefix)
 var publicIpName = '${safePrefix}-pip'
+var uiPublicIpName = '${toLower(uiDnsLabel)}-pip'
 var loadBalancerName = '${safePrefix}-lb'
 var loadBalancerFrontendName = 'public-frontend'
+var loadBalancerUiFrontendName = 'ui-frontend'
 var loadBalancerBackendPoolName = 'compose-vm'
 var loadBalancerProbeName = 'http-probe'
 var networkSecurityGroupName = '${safePrefix}-nsg'
@@ -90,6 +105,25 @@ resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   }
 }
 
+resource uiPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: uiPublicIpName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Public hostname for the SSO-protected Agentgateway management UI'
+  })
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings: {
+      domainNameLabel: toLower(uiDnsLabel)
+    }
+  }
+}
+
 resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
   name: loadBalancerName
   location: location
@@ -107,6 +141,14 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
         properties: {
           publicIPAddress: {
             id: publicIp.id
+          }
+        }
+      }
+      {
+        name: loadBalancerUiFrontendName
+        properties: {
+          publicIPAddress: {
+            id: uiPublicIp.id
           }
         }
       }
@@ -158,6 +200,50 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
           backendPort: 443
           frontendIPConfiguration: {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerFrontendName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+          }
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+          }
+          disableOutboundSnat: true
+          enableFloatingIP: false
+          enableTcpReset: true
+          idleTimeoutInMinutes: 30
+          loadDistribution: 'Default'
+        }
+      }
+      {
+        name: 'ui-http'
+        properties: {
+          protocol: 'Tcp'
+          frontendPort: 80
+          backendPort: 80
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+          }
+          probe: {
+            id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
+          }
+          disableOutboundSnat: true
+          enableFloatingIP: false
+          enableTcpReset: true
+          idleTimeoutInMinutes: 4
+          loadDistribution: 'Default'
+        }
+      }
+      {
+        name: 'ui-https'
+        properties: {
+          protocol: 'Tcp'
+          frontendPort: 443
+          backendPort: 443
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
           }
           backendAddressPool: {
             id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
@@ -376,7 +462,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
   location: location
   tags: union(commonTags, {
-    Description: 'Stores the Open WebUI and Azure OpenAI secrets read by the VM managed identity'
+    Description: 'Stores Open WebUI, Agentgateway UI, and Azure OpenAI secrets read by the VM managed identity'
   })
   properties: {
     tenantId: tenant().tenantId
@@ -461,6 +547,22 @@ resource webuiSecretKeyResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
   }
 }
 
+resource agentgatewayUiClientSecretResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'agentgateway-ui-client-secret'
+  properties: {
+    value: agentgatewayUiClientSecret
+  }
+}
+
+resource agentgatewayUiCookieSecretResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'agentgateway-ui-cookie-secret'
+  properties: {
+    value: agentgatewayUiCookieSecret
+  }
+}
+
 resource azureOpenAiKeyResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'azure-openai-api-key'
@@ -473,6 +575,9 @@ output vmName string = vm.name
 output publicIpAddress string = publicIp.properties.ipAddress
 output publicHostname string = publicIp.properties.dnsSettings.fqdn
 output publicUrl string = 'https://${publicIp.properties.dnsSettings.fqdn}'
+output uiPublicIpAddress string = uiPublicIp.properties.ipAddress
+output uiPublicHostname string = uiPublicIp.properties.dnsSettings.fqdn
+output uiPublicUrl string = 'https://${uiPublicIp.properties.dnsSettings.fqdn}'
 output keyVaultName string = keyVault.name
 output openAiAccountName string = openAiAccount.name
 output openAiEndpoint string = openAiAccount.properties.endpoint

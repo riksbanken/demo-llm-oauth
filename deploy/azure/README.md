@@ -8,11 +8,12 @@ translation, and keeps operational complexity low.
 The deployment creates:
 
 - one Ubuntu 24.04 `Standard_B2s` VM in Sweden Central;
-- a Standard public Load Balancer with a static public IP and
-  `<label>.swedencentral.cloudapp.azure.com` hostname;
+- a Standard public Load Balancer with separate static public IPs and Azure
+  hostnames for Open WebUI and the Agentgateway management UI;
 - a private-only VM NIC behind the Load Balancer;
 - an NSG allowing inbound TCP 80 and 443 only;
-- Caddy for automatic HTTPS and reverse proxying;
+- Caddy for automatic HTTPS and hostname-based reverse proxying;
+- a read-only Agentgateway management UI protected by Entra OIDC SSO;
 - an Azure Key Vault read by the VM's managed identity;
 - a regional Azure OpenAI `gpt-4.1-mini` deployment at 10K TPM, consumed through
   Azure's OpenAI-compatible `/openai/v1` endpoint; and
@@ -23,7 +24,7 @@ stored in GitHub. SSH is not publicly exposed.
 
 All Azure resources are tagged with the application, environment, owner,
 repository, management method, purpose, and a resource-specific description.
-The GitHub deployment identity and both SSO applications also receive Entra
+The GitHub deployment identity and all SSO applications also receive Entra
 management notes describing their POC purpose.
 
 ## Prerequisites
@@ -118,6 +119,26 @@ WebUI signing key. These are written once to
 Run the printed `gh variable set` and `gh secret set` commands immediately,
 then protect or securely archive the generated file.
 
+### Create the Agentgateway UI SSO registration
+
+Create the dedicated OIDC client after reserving the UI hostname:
+
+```bash
+./deploy/azure/bootstrap-agentgateway-ui-entra.sh \
+  --public-hostname "$AGENTGATEWAY_UI_HOSTNAME" \
+  --access-group aifabriken-dev
+```
+
+This creates **LLM OAuth POC - Agentgateway UI**, registers the exact
+`/oauth/callback` URI, requires enterprise-application assignment, assigns the
+specified Entra group when permitted, and generates both the client secret and
+the persistent OIDC cookie-encryption secret. Run the printed GitHub variable
+and secret commands immediately.
+
+The Agentgateway UI is configured globally read-only because GitHub and Bicep
+own the deployed configuration. The unauthenticated local admin interface on
+port 15000 remains bound to loopback and is never exposed.
+
 ### Assign POC users or groups
 
 In the Azure portal:
@@ -142,16 +163,21 @@ The `poc` environment must contain these variables:
 | `AZURE_RESOURCE_GROUP` | GitHub OIDC bootstrap |
 | `AZURE_LOCATION` | `swedencentral` |
 | `AZURE_DNS_LABEL` | GitHub OIDC bootstrap |
+| `AZURE_UI_DNS_LABEL` | GitHub OIDC bootstrap |
 | `VM_ADMIN_USERNAME` | GitHub OIDC bootstrap |
 | `VM_ADMIN_SSH_PUBLIC_KEY` | GitHub OIDC bootstrap |
 | `ENTRA_TENANT_ID` | Entra SSO bootstrap |
 | `GATEWAY_APP_ID` | Entra SSO bootstrap |
 | `WEBUI_CLIENT_ID` | Entra SSO bootstrap |
+| `AGENTGATEWAY_UI_CLIENT_ID` | Agentgateway UI Entra bootstrap |
+| `AGENTGATEWAY_UI_HOSTNAME` | Agentgateway UI Entra bootstrap |
 
 It must contain these secrets:
 
 - `WEBUI_CLIENT_SECRET`
 - `WEBUI_SECRET_KEY`
+- `AGENTGATEWAY_UI_CLIENT_SECRET`
+- `AGENTGATEWAY_UI_COOKIE_SECRET`
 
 Do not create an `AZURE_CLIENT_SECRET`; the workflow uses OIDC.
 
@@ -171,8 +197,9 @@ Run **Deploy Azure POC** from the GitHub Actions UI. The workflow:
 After initial setup, relevant pushes to `main` redeploy automatically. Only one
 POC deployment runs at a time.
 
-Open the URL reported in the workflow summary, sign in through Entra, select
-`llm`, and send a message.
+Open the Open WebUI URL reported in the workflow summary, sign in through
+Entra, select `llm`, and send a message. Open the Agentgateway UI URL and verify
+that it redirects through Entra before serving the read-only management UI.
 
 ## Deployment behavior
 
@@ -193,13 +220,17 @@ before teardown if conversations or accounts must be retained.
 
 ## Security boundaries
 
-- The Standard Load Balancer owns the public IP and forwards only TCP 80 and
-  443 to the VM's private NIC.
+- The Standard Load Balancer owns separate public IPs for Open WebUI and the
+  Agentgateway UI and forwards only TCP 80 and 443 to the VM's private NIC.
 - The Load Balancer also provides explicit outbound SNAT through the same
   static IP; no public IP is attached to the VM NIC.
 - The NSG exposes only TCP 80 and 443 and permits the Load Balancer health
   probe on 443.
-- Caddy is the only public container.
+- Caddy is the only public container and separates the two applications by
+  hostname.
+- The Agentgateway management UI listener is protected by OIDC and operates in
+  read-only storage mode; the unauthenticated port-15000 admin interface remains
+  loopback-only.
 - Open WebUI and Agentgateway host ports remain bound to loopback.
 - Agentgateway validates tenant, issuer, audience, expiry, and `llm.invoke` on
   every inference request.
@@ -222,8 +253,16 @@ Check the public health endpoint:
 curl -i "https://$PUBLIC_HOSTNAME/health"
 ```
 
-The gateway is deliberately not public. To test it on the VM without opening
-SSH, use Azure Run Command:
+Verify that the Agentgateway UI redirects to Entra:
+
+```bash
+curl -sS -o /dev/null -D- \
+  "https://$AGENTGATEWAY_UI_HOSTNAME/ui" \
+  | grep -i '^location: https://login.microsoftonline.com/'
+```
+
+The LLM data gateway is deliberately not public. To test it on the VM without
+opening SSH, use Azure Run Command:
 
 ```bash
 az vm run-command invoke \

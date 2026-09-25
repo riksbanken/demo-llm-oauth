@@ -6,6 +6,7 @@ github_environment='poc'
 location='swedencentral'
 resource_group='rg-demo-llm-oauth-poc'
 dns_label=''
+ui_dns_label=''
 vm_admin_username='azureadmin'
 ssh_public_key_file=''
 output_file='deploy/azure/generated/github-bootstrap.env'
@@ -19,7 +20,8 @@ Options:
   --github-environment NAME        GitHub environment (default: poc)
   --location REGION                Azure region (default: swedencentral)
   --resource-group NAME            Azure resource group
-  --dns-label LABEL                Azure Public IP DNS label (required, max 40 characters)
+  --dns-label LABEL                Open WebUI Public IP DNS label (required, max 40 characters)
+  --ui-dns-label LABEL             Agentgateway UI DNS label (default: <dns-label>-gateway)
   --vm-admin-username NAME         Break-glass VM administrator username
   --ssh-public-key-file PATH       Break-glass SSH public key file (required)
   --output-file PATH               Generated non-secret environment file
@@ -33,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --location) location=$2; shift 2 ;;
     --resource-group) resource_group=$2; shift 2 ;;
     --dns-label) dns_label=$2; shift 2 ;;
+    --ui-dns-label) ui_dns_label=$2; shift 2 ;;
     --vm-admin-username) vm_admin_username=$2; shift 2 ;;
     --ssh-public-key-file) ssh_public_key_file=$2; shift 2 ;;
     --output-file) output_file=$2; shift 2 ;;
@@ -47,6 +50,13 @@ if [[ ! "$repository" =~ ^[^/]+/[^/]+$ ]]; then
 fi
 if [[ ! "$dns_label" =~ ^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$ ]]; then
   printf -- '--dns-label must be 3-40 lowercase letters, digits, or hyphens and cannot start/end with a hyphen.\n' >&2
+  exit 2
+fi
+if [[ -z "$ui_dns_label" ]]; then
+  ui_dns_label="${dns_label}-gateway"
+fi
+if [[ ! "$ui_dns_label" =~ ^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$ ]]; then
+  printf -- '--ui-dns-label must be 3-40 lowercase letters, digits, or hyphens and cannot start/end with a hyphen.\n' >&2
   exit 2
 fi
 if [[ -z "$ssh_public_key_file" || ! -f "$ssh_public_key_file" ]]; then
@@ -146,6 +156,37 @@ public_hostname=$(az network public-ip show \
   --query dnsSettings.fqdn \
   --output tsv)
 
+ui_public_ip_name="${ui_dns_label}-pip"
+printf 'Reserving Agentgateway UI hostname %s.%s.cloudapp.azure.com...\n' "$ui_dns_label" "$location"
+az network public-ip create \
+  --resource-group "$resource_group" \
+  --name "$ui_public_ip_name" \
+  --location "$location" \
+  --sku Standard \
+  --allocation-method Static \
+  --version IPv4 \
+  --dns-name "$ui_dns_label" \
+  --tags \
+    Application='demo-llm-oauth' \
+    Environment='POC' \
+    Owner='aifabriken-dev' \
+    Purpose='Entra OAuth protected Agentgateway management UI for the LLM POC' \
+    ManagedBy='GitHub Actions and Bicep' \
+    Repository='https://github.com/riksbanken/demo-llm-oauth' \
+    Description='Public hostname for the SSO-protected Agentgateway management UI' \
+    RB_ApplicationName='Development Services' \
+    RB_Creator='Johan.Carlin@riksbank.se' \
+    RB_Environment='Utv' \
+    RB_FO='Analysis' \
+    RB_Owner='Johan.Carlin@riksbank.se' \
+    RB_StartDate='2026-09-22' \
+  --output none
+ui_public_hostname=$(az network public-ip show \
+  --resource-group "$resource_group" \
+  --name "$ui_public_ip_name" \
+  --query dnsSettings.fqdn \
+  --output tsv)
+
 app_display_name="github-${repository//\//-}-${github_environment}"
 app_count=$(az ad app list --filter "displayName eq '$app_display_name'" --query 'length(@)' --output tsv)
 if [[ "$app_count" == '0' ]]; then
@@ -234,9 +275,11 @@ umask 077
   printf 'AZURE_RESOURCE_GROUP=%q\n' "$resource_group"
   printf 'AZURE_LOCATION=%q\n' "$location"
   printf 'AZURE_DNS_LABEL=%q\n' "$dns_label"
+  printf 'AZURE_UI_DNS_LABEL=%q\n' "$ui_dns_label"
   printf 'VM_ADMIN_USERNAME=%q\n' "$vm_admin_username"
   printf 'VM_ADMIN_SSH_PUBLIC_KEY=%q\n' "$ssh_public_key"
   printf 'PUBLIC_HOSTNAME=%q\n' "$public_hostname"
+  printf 'AGENTGATEWAY_UI_HOSTNAME=%q\n' "$ui_public_hostname"
   printf 'GITHUB_ENVIRONMENT=%q\n' "$github_environment"
   printf 'ROLE_ASSIGNMENT_PENDING=%q\n' "$role_assignment_pending"
 } > "$output_file"
@@ -245,7 +288,8 @@ chmod 0600 "$output_file"
 cat <<EOF
 
 Bootstrap complete.
-Public URL: https://$public_hostname
+Open WebUI URL: https://$public_hostname
+Agentgateway UI URL: https://$ui_public_hostname/ui
 OIDC subject: $credential_subject
 Values written to: $output_file
 EOF
@@ -276,6 +320,7 @@ Configure the GitHub environment variables with:
   gh variable set AZURE_RESOURCE_GROUP --env '$github_environment' --body "\$AZURE_RESOURCE_GROUP"
   gh variable set AZURE_LOCATION --env '$github_environment' --body "\$AZURE_LOCATION"
   gh variable set AZURE_DNS_LABEL --env '$github_environment' --body "\$AZURE_DNS_LABEL"
+  gh variable set AZURE_UI_DNS_LABEL --env '$github_environment' --body "\$AZURE_UI_DNS_LABEL"
   gh variable set VM_ADMIN_USERNAME --env '$github_environment' --body "\$VM_ADMIN_USERNAME"
   gh variable set VM_ADMIN_SSH_PUBLIC_KEY --env '$github_environment' --body "\$VM_ADMIN_SSH_PUBLIC_KEY"
 EOF

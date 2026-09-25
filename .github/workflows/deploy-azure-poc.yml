@@ -44,19 +44,25 @@ jobs:
           AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_DNS_LABEL: ${{ vars.AZURE_DNS_LABEL }}
+          AZURE_UI_DNS_LABEL: ${{ vars.AZURE_UI_DNS_LABEL }}
           VM_ADMIN_USERNAME: ${{ vars.VM_ADMIN_USERNAME }}
           VM_ADMIN_SSH_PUBLIC_KEY: ${{ vars.VM_ADMIN_SSH_PUBLIC_KEY }}
           WEBUI_CLIENT_SECRET: ${{ secrets.WEBUI_CLIENT_SECRET }}
           WEBUI_SECRET_KEY: ${{ secrets.WEBUI_SECRET_KEY }}
+          AGENTGATEWAY_UI_CLIENT_SECRET: ${{ secrets.AGENTGATEWAY_UI_CLIENT_SECRET }}
+          AGENTGATEWAY_UI_COOKIE_SECRET: ${{ secrets.AGENTGATEWAY_UI_COOKIE_SECRET }}
         run: |
           set -euo pipefail
           : "${AZURE_RESOURCE_GROUP:?Missing AZURE_RESOURCE_GROUP}"
           : "${AZURE_LOCATION:?Missing AZURE_LOCATION}"
           : "${AZURE_DNS_LABEL:?Missing AZURE_DNS_LABEL}"
+          : "${AZURE_UI_DNS_LABEL:?Missing AZURE_UI_DNS_LABEL}"
           : "${VM_ADMIN_USERNAME:?Missing VM_ADMIN_USERNAME}"
           : "${VM_ADMIN_SSH_PUBLIC_KEY:?Missing VM_ADMIN_SSH_PUBLIC_KEY}"
           : "${WEBUI_CLIENT_SECRET:?Missing WEBUI_CLIENT_SECRET}"
           : "${WEBUI_SECRET_KEY:?Missing WEBUI_SECRET_KEY}"
+          : "${AGENTGATEWAY_UI_CLIENT_SECRET:?Missing AGENTGATEWAY_UI_CLIENT_SECRET}"
+          : "${AGENTGATEWAY_UI_COOKIE_SECRET:?Missing AGENTGATEWAY_UI_COOKIE_SECRET}"
 
           deployment_name="llm-oauth-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           outputs=$(az deployment group create \
@@ -66,16 +72,21 @@ jobs:
             --parameters \
               location="$AZURE_LOCATION" \
               dnsLabel="$AZURE_DNS_LABEL" \
+              uiDnsLabel="$AZURE_UI_DNS_LABEL" \
               vmAdminUsername="$VM_ADMIN_USERNAME" \
               vmAdminSshPublicKey="$VM_ADMIN_SSH_PUBLIC_KEY" \
               webuiClientSecret="$WEBUI_CLIENT_SECRET" \
               webuiSecretKey="$WEBUI_SECRET_KEY" \
+              agentgatewayUiClientSecret="$AGENTGATEWAY_UI_CLIENT_SECRET" \
+              agentgatewayUiCookieSecret="$AGENTGATEWAY_UI_COOKIE_SECRET" \
             --query properties.outputs \
             --output json)
 
           echo "vm_name=$(jq -r '.vmName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "public_hostname=$(jq -r '.publicHostname.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "public_url=$(jq -r '.publicUrl.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "ui_public_hostname=$(jq -r '.uiPublicHostname.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "ui_public_url=$(jq -r '.uiPublicUrl.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "key_vault_name=$(jq -r '.keyVaultName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "openai_account_name=$(jq -r '.openAiAccountName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
           echo "openai_endpoint=$(jq -r '.openAiEndpoint.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
@@ -93,11 +104,15 @@ jobs:
           ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
           GATEWAY_APP_ID: ${{ vars.GATEWAY_APP_ID }}
           WEBUI_CLIENT_ID: ${{ vars.WEBUI_CLIENT_ID }}
+          AGENTGATEWAY_UI_HOSTNAME: ${{ steps.infrastructure.outputs.ui_public_hostname }}
+          AGENTGATEWAY_UI_CLIENT_ID: ${{ vars.AGENTGATEWAY_UI_CLIENT_ID }}
         run: |
           set -euo pipefail
           : "${ENTRA_TENANT_ID:?Missing ENTRA_TENANT_ID}"
           : "${GATEWAY_APP_ID:?Missing GATEWAY_APP_ID}"
           : "${WEBUI_CLIENT_ID:?Missing WEBUI_CLIENT_ID}"
+          : "${AGENTGATEWAY_UI_HOSTNAME:?Missing AGENTGATEWAY_UI_HOSTNAME}"
+          : "${AGENTGATEWAY_UI_CLIENT_ID:?Missing AGENTGATEWAY_UI_CLIENT_ID}"
 
           tar --create --gzip --file /tmp/llm-oauth-compose.tgz \
             compose.yaml compose.production.yaml compose.azure.yaml
@@ -117,7 +132,9 @@ jobs:
               "$WEBUI_CLIENT_ID" \
               "$MODEL_DEPLOYMENT_NAME" \
               "$OPENAI_ENDPOINT" \
-              "$OPENAI_ACCOUNT_NAME"; do
+              "$OPENAI_ACCOUNT_NAME" \
+              "$AGENTGATEWAY_UI_HOSTNAME" \
+              "$AGENTGATEWAY_UI_CLIENT_ID"; do
               printf ' %q' "$value"
             done
             printf '\n'
@@ -156,15 +173,35 @@ jobs:
             "$PUBLIC_URL/health" >/dev/null
           printf 'Healthy: %s\n' "$PUBLIC_URL"
 
+      - name: Verify Agentgateway UI SSO redirect
+        env:
+          UI_PUBLIC_URL: ${{ steps.infrastructure.outputs.ui_public_url }}
+        run: |
+          set -euo pipefail
+          headers=$(mktemp)
+          curl \
+            --show-error \
+            --silent \
+            --retry 30 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --max-time 10 \
+            --output /dev/null \
+            --dump-header "$headers" \
+            "$UI_PUBLIC_URL/ui"
+          grep --ignore-case --extended-regexp '^location: https://login\.microsoftonline\.com/' "$headers"
+
       - name: Publish deployment summary
         env:
           PUBLIC_URL: ${{ steps.infrastructure.outputs.public_url }}
+          UI_PUBLIC_URL: ${{ steps.infrastructure.outputs.ui_public_url }}
           MODEL_DEPLOYMENT_NAME: ${{ steps.infrastructure.outputs.model_deployment_name }}
         run: |
           {
             echo '## Azure POC deployment'
             echo
-            echo "- URL: $PUBLIC_URL"
+            echo "- Open WebUI: $PUBLIC_URL"
+            echo "- Agentgateway UI: $UI_PUBLIC_URL/ui"
             echo "- Model deployment: $MODEL_DEPLOYMENT_NAME"
             echo "- Commit: $GITHUB_SHA"
           } >> "$GITHUB_STEP_SUMMARY"
