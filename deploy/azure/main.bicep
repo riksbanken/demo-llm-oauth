@@ -62,6 +62,7 @@ var loadBalancerName = '${safePrefix}-lb'
 var loadBalancerFrontendName = 'public-frontend'
 var loadBalancerUiFrontendName = 'ui-frontend'
 var loadBalancerBackendPoolName = 'compose-vm'
+var loadBalancerUiBackendPoolName = 'compose-vm-ui'
 var loadBalancerProbeName = 'http-probe'
 var networkSecurityGroupName = '${safePrefix}-nsg'
 var virtualNetworkName = '${safePrefix}-vnet'
@@ -157,6 +158,9 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
       {
         name: loadBalancerBackendPoolName
       }
+      {
+        name: loadBalancerUiBackendPoolName
+      }
     ]
     probes: [
       {
@@ -224,7 +228,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
           }
           backendAddressPool: {
-            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
           }
           probe: {
             id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
@@ -246,7 +250,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', loadBalancerName, loadBalancerUiFrontendName)
           }
           backendAddressPool: {
-            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+            id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
           }
           probe: {
             id: resourceId('Microsoft.Network/loadBalancers/probes', loadBalancerName, loadBalancerProbeName)
@@ -381,6 +385,9 @@ resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
           loadBalancerBackendAddressPools: [
             {
               id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerBackendPoolName)
+            }
+            {
+              id: resourceId('Microsoft.Network/loadBalancers/backendAddressPools', loadBalancerName, loadBalancerUiBackendPoolName)
             }
           ]
         }
