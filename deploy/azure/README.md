@@ -180,9 +180,11 @@ The VM keeps releases under `/opt/llm-oauth/releases/<git-sha>` and runs all
 releases with the stable Compose project name `llm-oauth`. Docker named volumes
 therefore survive workflow deployments.
 
-A deployment validates Compose before changing containers. If Open WebUI does
-not become healthy after an update, the script reapplies the previous release.
-The newest three release directories are retained.
+A deployment validates Compose before changing containers and recreates the
+three containers so embedded Compose config changes are always applied. Named
+volumes preserve Open WebUI and Caddy state. If Open WebUI does not become
+healthy after an update, the script reapplies the previous release. The newest
+three release directories are retained.
 
 Open WebUI data is stored on the VM OS disk. It survives container replacement
 and VM reboot, but it is not highly available and is lost if the VM/OS disk or

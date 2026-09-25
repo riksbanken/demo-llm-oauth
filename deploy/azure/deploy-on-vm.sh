@@ -183,7 +183,7 @@ compose_in() {
 rollback() {
   if [[ -n "$previous_release" && -d "$previous_release" && -f "$previous_release/.env" ]]; then
     printf 'Deployment failed; restoring previous release %s.\n' "$previous_release" >&2
-    compose_in "$previous_release" up --detach --remove-orphans
+    compose_in "$previous_release" up --detach --remove-orphans --force-recreate
   else
     printf 'Deployment failed and no previous release is available.\n' >&2
   fi
@@ -191,7 +191,7 @@ rollback() {
 
 compose_in "$release_dir" config --quiet
 compose_in "$release_dir" pull
-if ! compose_in "$release_dir" up --detach --remove-orphans; then
+if ! compose_in "$release_dir" up --detach --remove-orphans --force-recreate; then
   rollback
   exit 1
 fi
