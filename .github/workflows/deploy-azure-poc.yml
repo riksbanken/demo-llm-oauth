@@ -103,12 +103,11 @@ jobs:
             compose.yaml compose.production.yaml compose.azure.yaml
           bundle_base64=$(base64 --wrap=0 /tmp/llm-oauth-compose.tgz)
 
-          az vm run-command invoke \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$VM_NAME" \
-            --command-id RunShellScript \
-            --scripts @deploy/azure/deploy-on-vm.sh \
-            --parameters \
+          wrapper_script=/tmp/deploy-on-vm-wrapper.sh
+          {
+            printf '#!/usr/bin/env bash\n'
+            printf 'set --'
+            for value in \
               "$bundle_base64" \
               "$GITHUB_SHA" \
               "$KEY_VAULT_NAME" \
@@ -118,8 +117,28 @@ jobs:
               "$WEBUI_CLIENT_ID" \
               "$MODEL_DEPLOYMENT_NAME" \
               "$OPENAI_ENDPOINT" \
-              "$OPENAI_ACCOUNT_NAME" \
-            --output json
+              "$OPENAI_ACCOUNT_NAME"; do
+              printf ' %q' "$value"
+            done
+            printf '\n'
+            tail --lines=+2 deploy/azure/deploy-on-vm.sh
+          } > "$wrapper_script"
+          chmod 0700 "$wrapper_script"
+
+          run_result=$(az vm run-command invoke \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts @"$wrapper_script" \
+            --output json)
+          run_message=$(jq -r '.value[0].message // ""' <<<"$run_result")
+          printf '%s\n' "$run_message"
+
+          success_marker="Deployed release $GITHUB_SHA successfully."
+          if ! grep --fixed-strings --quiet "$success_marker" <<<"$run_message"; then
+            echo 'VM deployment did not return its success marker.' >&2
+            exit 1
+          fi
 
       - name: Verify public HTTPS health
         env:
