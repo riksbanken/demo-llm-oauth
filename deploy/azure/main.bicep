@@ -47,7 +47,7 @@ var publicIpName = '${safePrefix}-pip'
 var loadBalancerName = '${safePrefix}-lb'
 var loadBalancerFrontendName = 'public-frontend'
 var loadBalancerBackendPoolName = 'compose-vm'
-var loadBalancerProbeName = 'https-probe'
+var loadBalancerProbeName = 'http-probe'
 var networkSecurityGroupName = '${safePrefix}-nsg'
 var virtualNetworkName = '${safePrefix}-vnet'
 var subnetName = 'default'
@@ -121,7 +121,7 @@ resource loadBalancer 'Microsoft.Network/loadBalancers@2024-05-01' = {
         name: loadBalancerProbeName
         properties: {
           protocol: 'Tcp'
-          port: 443
+          port: 80
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -237,7 +237,7 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-0
           direction: 'Inbound'
           protocol: 'Tcp'
           sourcePortRange: '*'
-          destinationPortRange: '443'
+          destinationPortRange: '80'
           sourceAddressPrefix: 'AzureLoadBalancer'
           destinationAddressPrefix: '*'
         }
