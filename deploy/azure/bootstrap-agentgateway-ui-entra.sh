@@ -101,6 +101,30 @@ az rest --method PATCH \
   --output none
 az ad sp update --id "$app_id" --set appRoleAssignmentRequired=true --output none
 
+printf 'Adding minimal Microsoft Graph OIDC permissions...\n'
+for attempt in $(seq 1 12); do
+  if az ad app permission add \
+      --id "$app_id" \
+      --api '00000003-0000-0000-c000-000000000000' \
+      --api-permissions \
+        '37f7f235-527c-4136-accd-4a02d197296e=Scope' \
+        '14dad69e-099b-42c9-810b-d002981feec1=Scope' \
+        '64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0=Scope' \
+      --output none 2>/dev/null; then
+    break
+  fi
+  if [[ "$attempt" == '12' ]]; then
+    printf 'Unable to add the OIDC permissions after waiting for directory replication.\n' >&2
+    exit 1
+  fi
+  sleep 5
+done
+
+admin_consent_pending=false
+if ! az ad app permission admin-consent --id "$app_id" --output none 2>/dev/null; then
+  admin_consent_pending=true
+fi
+
 secret_end_date=$(date -u -d "+${secret_days} days" '+%Y-%m-%dT%H:%M:%SZ')
 credential_file="$temp_dir/credential.json"
 az ad app credential reset \
@@ -134,6 +158,7 @@ umask 077
   printf 'AGENTGATEWAY_UI_SP_OBJECT_ID=%q\n' "$sp_object_id"
   printf 'CLIENT_SECRET_END_DATE=%q\n' "$secret_end_date"
   printf 'GROUP_ASSIGNMENT_PENDING=%q\n' "$group_assignment_pending"
+  printf 'ADMIN_CONSENT_PENDING=%q\n' "$admin_consent_pending"
 } > "$output_file"
 chmod 0600 "$output_file"
 
@@ -150,6 +175,16 @@ if [[ "$group_assignment_pending" == true ]]; then
   cat <<EOF
 
 ACTION REQUIRED: assign the Entra group '$access_group' to the '$name' enterprise application.
+EOF
+fi
+
+if [[ "$admin_consent_pending" == true ]]; then
+  cat <<EOF
+
+ACTION REQUIRED: grant tenant-wide admin consent for the minimal delegated Microsoft Graph
+permissions openid, profile, and email:
+
+  az ad app permission admin-consent --id '$app_id'
 EOF
 fi
 

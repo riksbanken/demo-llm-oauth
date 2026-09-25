@@ -19,6 +19,7 @@ export AGENTGATEWAY_UI_HOSTNAME='validation-agentgateway.swedencentral.cloudapp.
 export AGENTGATEWAY_UI_CLIENT_ID='00000000-0000-0000-0000-000000000004'
 export AGENTGATEWAY_UI_CLIENT_SECRET='validation-agentgateway-client-secret'
 export AGENTGATEWAY_UI_COOKIE_SECRET='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+export AGENTGATEWAY_DATA_DIR='/tmp/demo-llm-oauth-agentgateway-data'
 
 docker compose \
   --file compose.yaml \
