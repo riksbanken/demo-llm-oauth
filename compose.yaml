@@ -52,6 +52,15 @@ services:
 configs:
   agentgateway:
     content: |
+      config:
+        standardAttributes:
+          user: "default(jwt.email, default(jwt.oid, jwt.sub))"
+      frontendPolicies:
+        accessLog:
+          add:
+            entra_tenant_id: "string(jwt.tid)"
+            entra_object_id: "string(jwt.oid)"
+            entra_email: "default(jwt.email, '')"
       llm:
         port: 4000
         policies:

@@ -57,10 +57,16 @@ configs:
         database:
           url: "sqlite:///data/agentgateway.db"
           maxConnections: 5
+        standardAttributes:
+          user: "default(jwt.email, default(jwt.oid, jwt.sub))"
         storage:
           mode: readOnly
       frontendPolicies:
         accessLog:
+          add:
+            entra_tenant_id: "string(jwt.tid)"
+            entra_object_id: "string(jwt.oid)"
+            entra_email: "default(jwt.email, '')"
           database:
             llm: metadata
       gateways:

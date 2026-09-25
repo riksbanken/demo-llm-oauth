@@ -38,6 +38,9 @@ is required. Open WebUI uses its built-in SQLite database on a named volume.
 5. In the app manifest, set `api.requestedAccessTokenVersion` to `2`, preserving
    the other fields. This makes the access token's audience the API's bare
    application-ID GUID and its issuer the tenant's `/v2.0` issuer.
+6. Under **Token configuration > Add optional claim > Access**, add `email`.
+   Agentgateway uses this signed access-token claim as the human-readable
+   request-log user label, with `oid` and then `sub` as fallbacks.
 
 The gateway registration needs no redirect URI and no client secret.
 
@@ -148,6 +151,12 @@ request. Tokens intended for Graph or the Open WebUI client are not accepted
 by the gateway. For a refresh check, keep the same browser session open past
 the access-token lifetime and send another message; `offline_access` enables
 renewal, subject to Entra session and Conditional Access policies.
+
+Agentgateway attributes authenticated request logs using the validated access
+token. The primary user label is selected as `email -> oid -> sub`, while the
+separate `entra_tenant_id`, `entra_object_id`, and `entra_email` fields retain
+the original signed claims. Existing access tokens must be renewed after adding
+the gateway access-token `email` claim.
 
 For startup and request failures, inspect `docker compose logs agentgateway`
 and `docker compose logs openwebui`. A 401 suggests a missing/expired token,

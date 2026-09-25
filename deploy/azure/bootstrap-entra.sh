@@ -109,6 +109,18 @@ cat > "$temp_dir/gateway-api.json" <<EOF
         "value": "llm.invoke"
       }
     ]
+  },
+  "optionalClaims": {
+    "accessToken": [
+      {
+        "additionalProperties": [],
+        "essential": false,
+        "name": "email",
+        "source": null
+      }
+    ],
+    "idToken": [],
+    "saml2Token": []
   }
 }
 EOF
