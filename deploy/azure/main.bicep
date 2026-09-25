@@ -1,0 +1,352 @@
+targetScope = 'resourceGroup'
+
+@description('Azure region for all regional resources.')
+param location string = resourceGroup().location
+
+@description('Unique Azure Public IP DNS label. This becomes <label>.<region>.cloudapp.azure.com.')
+@minLength(3)
+@maxLength(40)
+param dnsLabel string
+
+@description('Linux VM administrator username used only for break-glass access.')
+param vmAdminUsername string = 'azureadmin'
+
+@description('Break-glass SSH public key. The NSG does not expose port 22.')
+param vmAdminSshPublicKey string
+
+@secure()
+@description('Open WebUI Entra application client secret.')
+param webuiClientSecret string
+
+@secure()
+@description('Persistent Open WebUI session and OAuth encryption secret.')
+param webuiSecretKey string
+
+@description('VM SKU for the Compose host.')
+param vmSize string = 'Standard_B2s'
+
+@description('Azure OpenAI deployment name used as the upstream model identifier.')
+param modelDeploymentName string = 'gpt-4o-mini'
+
+@description('Azure OpenAI model name.')
+param modelName string = 'gpt-4o-mini'
+
+@description('Pinned Azure OpenAI model version.')
+param modelVersion string = '2024-07-18'
+
+@description('Regional Azure OpenAI deployment SKU. Keep Standard for regional processing.')
+param modelSkuName string = 'Standard'
+
+@description('Azure OpenAI capacity in thousands of tokens per minute.')
+@minValue(1)
+param modelCapacity int = 10
+
+var safePrefix = toLower(dnsLabel)
+var uniqueSuffix = uniqueString(subscription().id, resourceGroup().id, safePrefix)
+var publicIpName = '${safePrefix}-pip'
+var networkSecurityGroupName = '${safePrefix}-nsg'
+var virtualNetworkName = '${safePrefix}-vnet'
+var subnetName = 'default'
+var networkInterfaceName = '${safePrefix}-nic'
+var vmName = '${safePrefix}-vm'
+var keyVaultName = take('kv${uniqueSuffix}', 24)
+var openAiAccountName = take('aoai${uniqueSuffix}', 64)
+var cloudInit = loadTextContent('cloud-init.yaml')
+var commonTags = {
+  Application: 'demo-llm-oauth'
+  Environment: 'POC'
+  Owner: 'aifabriken-dev'
+  Purpose: 'Entra OAuth protected LLM proof of concept'
+  ManagedBy: 'GitHub Actions and Bicep'
+  Repository: 'https://github.com/riksbanken/demo-llm-oauth'
+  RB_ApplicationName: 'Development Services'
+  RB_Creator: 'Johan.Carlin@riksbank.se'
+  RB_Environment: 'Utv'
+  RB_FO: 'Analysis'
+  RB_Owner: 'Johan.Carlin@riksbank.se'
+  RB_StartDate: '2026-09-22'
+}
+
+resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: publicIpName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Stable public HTTPS endpoint and Azure OpenAI egress allowlist address'
+  })
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings: {
+      domainNameLabel: safePrefix
+    }
+  }
+}
+
+resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: networkSecurityGroupName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Limits public ingress to HTTP and HTTPS for the POC web endpoint'
+  })
+  properties: {
+    securityRules: [
+      {
+        name: 'Allow-HTTP'
+        properties: {
+          priority: 100
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '80'
+          sourceAddressPrefix: 'Internet'
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'Allow-HTTPS'
+        properties: {
+          priority: 110
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'Internet'
+          destinationAddressPrefix: '*'
+        }
+      }
+    ]
+  }
+}
+
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
+  name: virtualNetworkName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Private network for the Docker Compose VM'
+  })
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.42.0.0/16'
+      ]
+    }
+    subnets: [
+      {
+        name: subnetName
+        properties: {
+          addressPrefix: '10.42.0.0/24'
+          networkSecurityGroup: {
+            id: networkSecurityGroup.id
+          }
+        }
+      }
+    ]
+  }
+}
+
+resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
+  name: networkInterfaceName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Connects the Compose VM to its private network and static public IP'
+  })
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'primary'
+        properties: {
+          primary: true
+          privateIPAllocationMethod: 'Dynamic'
+          subnet: {
+            id: resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetwork.name, subnetName)
+          }
+          publicIPAddress: {
+            id: publicIp.id
+          }
+        }
+      }
+    ]
+  }
+}
+
+resource vm 'Microsoft.Compute/virtualMachines@2024-11-01' = {
+  name: vmName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Runs Open WebUI, Agentgateway, and Caddy using Docker Compose'
+  })
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    hardwareProfile: {
+      vmSize: vmSize
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'Canonical'
+        offer: 'ubuntu-24_04-lts'
+        sku: 'server'
+        version: 'latest'
+      }
+      osDisk: {
+        name: '${vmName}-osdisk'
+        createOption: 'FromImage'
+        diskSizeGB: 64
+        deleteOption: 'Delete'
+        managedDisk: {
+          storageAccountType: 'StandardSSD_LRS'
+        }
+      }
+    }
+    osProfile: {
+      computerName: vmName
+      adminUsername: vmAdminUsername
+      customData: base64(cloudInit)
+      linuxConfiguration: {
+        disablePasswordAuthentication: true
+        provisionVMAgent: true
+        patchSettings: {
+          assessmentMode: 'AutomaticByPlatform'
+          patchMode: 'AutomaticByPlatform'
+          automaticByPlatformSettings: {
+            bypassPlatformSafetyChecksOnUserSchedule: false
+            rebootSetting: 'IfRequired'
+          }
+        }
+        ssh: {
+          publicKeys: [
+            {
+              path: '/home/${vmAdminUsername}/.ssh/authorized_keys'
+              keyData: vmAdminSshPublicKey
+            }
+          ]
+        }
+      }
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: networkInterface.id
+          properties: {
+            primary: true
+            deleteOption: 'Delete'
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Stores the Open WebUI and Azure OpenAI secrets read by the VM managed identity'
+  })
+  properties: {
+    tenantId: tenant().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    accessPolicies: [
+      {
+        tenantId: tenant().tenantId
+        objectId: vm.identity.principalId
+        permissions: {
+          secrets: [
+            'get'
+          ]
+        }
+      }
+    ]
+    enableRbacAuthorization: false
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+    enablePurgeProtection: false
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource openAiAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
+  name: openAiAccountName
+  location: location
+  tags: union(commonTags, {
+    Description: 'Regional Azure OpenAI endpoint providing the POC chat model'
+  })
+  kind: 'OpenAI'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: openAiAccountName
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      bypass: 'None'
+      defaultAction: 'Deny'
+      ipRules: [
+        {
+          value: publicIp.properties.ipAddress
+        }
+      ]
+      virtualNetworkRules: []
+    }
+  }
+}
+
+resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+  parent: openAiAccount
+  name: modelDeploymentName
+  sku: {
+    name: modelSkuName
+    capacity: modelCapacity
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: modelName
+      version: modelVersion
+    }
+    versionUpgradeOption: 'NoAutoUpgrade'
+  }
+}
+
+resource webuiClientSecretResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'webui-client-secret'
+  properties: {
+    value: webuiClientSecret
+  }
+}
+
+resource webuiSecretKeyResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'webui-secret-key'
+  properties: {
+    value: webuiSecretKey
+  }
+}
+
+resource azureOpenAiKeyResource 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'azure-openai-api-key'
+  properties: {
+    value: openAiAccount.listKeys().key1
+  }
+}
+
+output vmName string = vm.name
+output publicIpAddress string = publicIp.properties.ipAddress
+output publicHostname string = publicIp.properties.dnsSettings.fqdn
+output publicUrl string = 'https://${publicIp.properties.dnsSettings.fqdn}'
+output keyVaultName string = keyVault.name
+output openAiAccountName string = openAiAccount.name
+output openAiEndpoint string = openAiAccount.properties.endpoint
+output modelDeploymentName string = modelDeployment.name

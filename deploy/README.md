@@ -35,7 +35,8 @@ Access authentication and a matching server-authorized SSH key are both
 required. The Hetzner API token is only needed for infrastructure changes;
 it is not installed on the VM.
 
-After configuring Entra and the upstream LLM in the private `.env`, start:
+After configuring Entra and the upstream LLM in the private `.env`, also set
+`WEBUI_URL=https://chat.johancarlin.com`, then start:
 
 ```bash
 cd /opt/llm-oauth

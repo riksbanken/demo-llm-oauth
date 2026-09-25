@@ -98,7 +98,10 @@ policy also removes browser cookies before forwarding to the LLM server.
 
 Alternatively, export `ENTRA_TENANT_ID`, `GATEWAY_APP_ID`, `WEBUI_CLIENT_ID`,
 `WEBUI_CLIENT_SECRET`, `WEBUI_SECRET_KEY`, `UPSTREAM_MODEL`, `UPSTREAM_BASE_URL`
-and, if needed, `UPSTREAM_API_KEY` before running Compose. A separate `.env`
+and, if needed, `UPSTREAM_API_KEY` before running Compose. The provider defaults
+to `openAI`. For Agentgateway's Azure provider, also set
+`UPSTREAM_PROVIDER=azure`, `AZURE_RESOURCE_NAME`,
+`AZURE_RESOURCE_TYPE=openAI`, and `AZURE_API_VERSION=v1`. A separate `.env`
 file is optional; all deployment configuration is already in `compose.yaml`.
 
 The upstream address is resolved inside the gateway container. `localhost`
@@ -158,14 +161,25 @@ Stop with `docker compose down`. The data volume is retained. Running
 ## Serving other machines
 
 Put an HTTPS reverse proxy in front of Open WebUI, with WebSocket support.
-Set `WEBUI_URL` to your public HTTPS URL and update `OPENID_REDIRECT_URI` plus
-the Entra Web redirect URI to that URL followed by `/oauth/oidc/callback`.
-Set `WEBUI_SESSION_COOKIE_SECURE` and `WEBUI_AUTH_COOKIE_SECURE` to `"true"`.
-Keep the gateway on the internal network; Open WebUI calls it from its server,
-so browsers do not need gateway access or gateway CORS configuration. Protect
-the upstream LLM from direct user access if the gateway is its access boundary.
-The default container-to-container hop is HTTP on one Docker host. Use HTTPS
-for that hop too if it crosses a host or other untrusted network.
+Export `WEBUI_URL` as the public HTTPS origin and include
+`compose.production.yaml`; it sets the Open WebUI URL, callback URI, and secure
+cookies. Register `${WEBUI_URL}/oauth/oidc/callback` as the Entra Web redirect
+URI. Keep the gateway on the internal network; Open WebUI calls it from its
+server, so browsers do not need gateway access or gateway CORS configuration.
+Protect the upstream LLM from direct user access if the gateway is its access
+boundary. The default container-to-container hop is HTTP on one Docker host.
+Use HTTPS for that hop too if it crosses a host or other untrusted network.
+
+## Azure POC deployment
+
+The repository includes a GitHub Actions deployment to an Azure Linux VM. It
+provisions a regional Azure OpenAI `gpt-4o-mini` deployment, preserves the
+Compose/SQLite behavior on the VM disk, exposes Open WebUI through Caddy HTTPS,
+and uses GitHub OIDC plus Azure VM Run Command so no public SSH port or Azure
+client secret is required.
+
+See [`deploy/azure/README.md`](deploy/azure/README.md) for the complete Azure,
+GitHub, Entra, deployment, verification, rotation, and teardown procedure.
 
 ## Validation and sources
 

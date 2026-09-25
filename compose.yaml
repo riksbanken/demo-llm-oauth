@@ -67,13 +67,16 @@ configs:
               - allow: 'has(jwt.scp) && "llm.invoke" in jwt.scp.split(" ")'
         models:
           - name: llm
-            provider: openAI
+            provider: "${UPSTREAM_PROVIDER:-openAI}"
             requestHeaders:
               remove: [cookie]
             params:
               model: "${UPSTREAM_MODEL:-REPLACE_WITH_UPSTREAM_MODEL}"
               baseUrl: "${UPSTREAM_BASE_URL:-http://REPLACE_WITH_LLM_HOST:8000/v1}"
               apiKey: "${UPSTREAM_API_KEY:-}"
+              azureResourceName: "${AZURE_RESOURCE_NAME:-}"
+              azureResourceType: "${AZURE_RESOURCE_TYPE:-openAI}"
+              azureApiVersion: "${AZURE_API_VERSION:-}"
 
 volumes:
   openwebui-data:

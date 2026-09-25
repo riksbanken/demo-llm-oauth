@@ -1,0 +1,151 @@
+name: Deploy Azure POC
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - compose.yaml
+      - compose.production.yaml
+      - compose.azure.yaml
+      - deploy/azure/**
+      - .github/workflows/deploy-azure-poc.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-poc
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: poc
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment sources
+        run: ./deploy/azure/validate.sh
+
+      - name: Log in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Azure infrastructure
+        id: infrastructure
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_DNS_LABEL: ${{ vars.AZURE_DNS_LABEL }}
+          VM_ADMIN_USERNAME: ${{ vars.VM_ADMIN_USERNAME }}
+          VM_ADMIN_SSH_PUBLIC_KEY: ${{ vars.VM_ADMIN_SSH_PUBLIC_KEY }}
+          WEBUI_CLIENT_SECRET: ${{ secrets.WEBUI_CLIENT_SECRET }}
+          WEBUI_SECRET_KEY: ${{ secrets.WEBUI_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          : "${AZURE_RESOURCE_GROUP:?Missing AZURE_RESOURCE_GROUP}"
+          : "${AZURE_LOCATION:?Missing AZURE_LOCATION}"
+          : "${AZURE_DNS_LABEL:?Missing AZURE_DNS_LABEL}"
+          : "${VM_ADMIN_USERNAME:?Missing VM_ADMIN_USERNAME}"
+          : "${VM_ADMIN_SSH_PUBLIC_KEY:?Missing VM_ADMIN_SSH_PUBLIC_KEY}"
+          : "${WEBUI_CLIENT_SECRET:?Missing WEBUI_CLIENT_SECRET}"
+          : "${WEBUI_SECRET_KEY:?Missing WEBUI_SECRET_KEY}"
+
+          deployment_name="llm-oauth-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          outputs=$(az deployment group create \
+            --name "$deployment_name" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file deploy/azure/main.bicep \
+            --parameters \
+              location="$AZURE_LOCATION" \
+              dnsLabel="$AZURE_DNS_LABEL" \
+              vmAdminUsername="$VM_ADMIN_USERNAME" \
+              vmAdminSshPublicKey="$VM_ADMIN_SSH_PUBLIC_KEY" \
+              webuiClientSecret="$WEBUI_CLIENT_SECRET" \
+              webuiSecretKey="$WEBUI_SECRET_KEY" \
+            --query properties.outputs \
+            --output json)
+
+          echo "vm_name=$(jq -r '.vmName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "public_hostname=$(jq -r '.publicHostname.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "public_url=$(jq -r '.publicUrl.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "key_vault_name=$(jq -r '.keyVaultName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "openai_account_name=$(jq -r '.openAiAccountName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "openai_endpoint=$(jq -r '.openAiEndpoint.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+          echo "model_deployment_name=$(jq -r '.modelDeploymentName.value' <<<"$outputs")" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Compose stack through VM Run Command
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM_NAME: ${{ steps.infrastructure.outputs.vm_name }}
+          KEY_VAULT_NAME: ${{ steps.infrastructure.outputs.key_vault_name }}
+          PUBLIC_HOSTNAME: ${{ steps.infrastructure.outputs.public_hostname }}
+          OPENAI_ACCOUNT_NAME: ${{ steps.infrastructure.outputs.openai_account_name }}
+          OPENAI_ENDPOINT: ${{ steps.infrastructure.outputs.openai_endpoint }}
+          MODEL_DEPLOYMENT_NAME: ${{ steps.infrastructure.outputs.model_deployment_name }}
+          ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+          GATEWAY_APP_ID: ${{ vars.GATEWAY_APP_ID }}
+          WEBUI_CLIENT_ID: ${{ vars.WEBUI_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          : "${ENTRA_TENANT_ID:?Missing ENTRA_TENANT_ID}"
+          : "${GATEWAY_APP_ID:?Missing GATEWAY_APP_ID}"
+          : "${WEBUI_CLIENT_ID:?Missing WEBUI_CLIENT_ID}"
+
+          tar --create --gzip --file /tmp/llm-oauth-compose.tgz \
+            compose.yaml compose.production.yaml compose.azure.yaml
+          bundle_base64=$(base64 --wrap=0 /tmp/llm-oauth-compose.tgz)
+
+          az vm run-command invoke \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$VM_NAME" \
+            --command-id RunShellScript \
+            --scripts @deploy/azure/deploy-on-vm.sh \
+            --parameters \
+              "$bundle_base64" \
+              "$GITHUB_SHA" \
+              "$KEY_VAULT_NAME" \
+              "$PUBLIC_HOSTNAME" \
+              "$ENTRA_TENANT_ID" \
+              "$GATEWAY_APP_ID" \
+              "$WEBUI_CLIENT_ID" \
+              "$MODEL_DEPLOYMENT_NAME" \
+              "$OPENAI_ENDPOINT" \
+              "$OPENAI_ACCOUNT_NAME" \
+            --output json
+
+      - name: Verify public HTTPS health
+        env:
+          PUBLIC_URL: ${{ steps.infrastructure.outputs.public_url }}
+        run: |
+          set -euo pipefail
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            --retry 60 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --max-time 10 \
+            "$PUBLIC_URL/health" >/dev/null
+          printf 'Healthy: %s\n' "$PUBLIC_URL"
+
+      - name: Publish deployment summary
+        env:
+          PUBLIC_URL: ${{ steps.infrastructure.outputs.public_url }}
+          MODEL_DEPLOYMENT_NAME: ${{ steps.infrastructure.outputs.model_deployment_name }}
+        run: |
+          {
+            echo '## Azure POC deployment'
+            echo
+            echo "- URL: $PUBLIC_URL"
+            echo "- Model deployment: $MODEL_DEPLOYMENT_NAME"
+            echo "- Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
