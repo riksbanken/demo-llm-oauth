@@ -54,7 +54,7 @@ if [[ -z "$ssh_public_key_file" || ! -f "$ssh_public_key_file" ]]; then
   exit 2
 fi
 
-for command in az python3; do
+for command in az gh python3; do
   command -v "$command" >/dev/null || { printf '%s is required.\n' "$command" >&2; exit 1; }
 done
 az account show >/dev/null
@@ -188,8 +188,12 @@ if [[ "$role_assignment_count" == '0' ]]; then
   fi
 fi
 
-credential_name="github-${github_environment}"
-credential_subject="repo:${repository}:environment:${github_environment}"
+repository_owner=${repository%%/*}
+repository_name=${repository#*/}
+repository_owner_id=$(gh api "repos/${repository}" --jq '.owner.id')
+repository_id=$(gh api "repos/${repository}" --jq '.id')
+credential_name="github-${github_environment}-immutable"
+credential_subject="repo:${repository_owner}@${repository_owner_id}/${repository_name}@${repository_id}:environment:${github_environment}"
 existing_credential=$(az ad app federated-credential list \
   --id "$deployer_object_id" \
   --query "[?name=='${credential_name}'] | [0]" \
@@ -203,7 +207,7 @@ if [[ "$existing_credential" == 'null' || -z "$existing_credential" ]]; then
   "name": "$credential_name",
   "issuer": "https://token.actions.githubusercontent.com",
   "subject": "$credential_subject",
-  "description": "GitHub Actions environment $github_environment for $repository",
+  "description": "GitHub Actions immutable repository subject for environment $github_environment",
   "audiences": ["api://AzureADTokenExchange"]
 }
 EOF
