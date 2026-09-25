@@ -313,26 +313,38 @@ Common failures:
 
 ## Cost controls
 
-The main idle cost is the `Standard_B2s` VM. The repository includes
-`.github/workflows/manage-azure-poc.yml`, which deallocates the VM every day at
-18:07 Stockholm time and runs a second safety shutdown at 23:37. The schedule
-uses `Europe/Stockholm`, so daylight-saving changes are automatic. Both the
-management and deployment workflows share the same concurrency group, so a
-scheduled shutdown cannot interrupt an active deployment.
+The repository includes `.github/workflows/manage-azure-poc.yml`, which tears
+down the billable runtime every day at 18:07 Stockholm time and runs a second
+safety pass at 23:37. The schedule uses `Europe/Stockholm`, so daylight-saving
+changes are automatic. Both the management and deployment workflows share the
+same concurrency group, so scheduled teardown cannot interrupt an active
+deployment.
 
-Deallocation stops CPU/RAM billing but preserves the VM, Docker data, SQLite
-databases, certificates, and hostnames. These resources still have independent
-idle costs:
+The `stop` action:
 
-| Resource | Cost while VM is deallocated |
+1. deallocates the `Standard_B2s` VM, stopping CPU/RAM billing; and
+2. deletes the Standard Load Balancer, stopping its configured-rule charge.
+
+It deliberately retains the items tied to administrator-approved access or
+stable identity, and the low/no-idle-cost foundation needed for reliable
+recreation:
+
+| Retained resource | Reason and remaining idle cost |
 | --- | --- |
-| 64 GiB Standard SSD OS disk | Continues to incur storage cost |
-| Two Standard public IPs | Continue to incur hourly IP cost |
-| Standard Load Balancer | Configured rules continue to incur the applicable hourly cost |
-| Key Vault | No meaningful idle compute charge; operations are billed |
-| Azure OpenAI Standard deployment | Pay-per-token; no inference charge while unused |
-| VNet, NIC, and NSG | No direct hourly compute charge |
+| Resource group and GitHub service-principal RBAC | Preserves the administrator-granted Contributor assignment; no resource-group charge |
+| Three Entra applications, consent, and group assignments | Preserves administrator-approved identity policy; no Azure infrastructure charge |
+| Two Standard public IPs | Preserve the approved callback hostnames and static Azure OpenAI egress IP; continue to incur hourly IP cost |
+| 64 GiB Standard SSD OS disk | Preserves Caddy certificates and avoids daily ACME reissuance/rate limits; continues to incur storage cost |
+| Key Vault | Preserves deployment secrets; operations are billed but there is no meaningful idle compute charge |
+| Azure OpenAI Standard deployment | Preserves model availability/quota; pay-per-token with no inference charge while unused |
+| VNet, NIC, and NSG | Required to restart the retained VM; no direct hourly compute charge |
 | Bandwidth | Charged only when traffic is transferred |
+
+Open WebUI accounts/conversations and Agentgateway logs happen to remain on the
+retained disk, but the POC does not rely on that persistence. They can be wiped
+manually without changing the cost profile. Deleting the disk nightly would
+save its storage charge but would also discard Caddy's certificate state and
+quickly risk public-certificate issuance limits.
 
 Use the **Manage Azure POC** workflow for manual control, or run:
 
@@ -342,15 +354,17 @@ gh workflow run manage-azure-poc.yml -f action=status
 gh workflow run manage-azure-poc.yml -f action=stop
 ```
 
-`stop` uses Azure **deallocate**, not a guest operating-system shutdown. A VM
-that is merely stopped but still allocated continues to incur compute charges.
-`start` waits for both public endpoints to become healthy. Running the normal
-deployment workflow also starts a deallocated VM before applying Compose.
+`stop` uses Azure **deallocate**, not a guest operating-system shutdown, and
+then removes the Load Balancer. A VM that is merely stopped but still allocated
+continues to incur compute charges. `start` dispatches the full deployment
+workflow, which recreates the Load Balancer, starts the retained VM, reapplies
+Compose, and verifies both public endpoints.
 
 GitHub notes that scheduled workflows can be delayed under load. The later
-safety run reduces the chance that the VM remains allocated overnight. For zero
-idle infrastructure cost, delete the resource group using the teardown process;
-that also removes the persistent application data unless it is backed up first.
+safety run reduces the chance that the runtime remains allocated overnight.
+The scheduled workflow never deletes the resource group, RBAC assignment,
+Entra applications/consent, Key Vault, Azure OpenAI resource, public IPs, or VM
+disk.
 
 ## Rotate Open WebUI secrets
 
