@@ -237,6 +237,9 @@ before teardown if conversations or accounts must be retained.
   remains loopback-only.
 - Agentgateway stores request metadata, timing, token usage, status, and cost in
   a local SQLite database. Prompt and completion content is not persisted.
+- Authenticated request logs use the signed Entra access-token identity:
+  `email -> oid -> sub` for the user label, with tenant ID, object ID, and email
+  retained as separate log attributes.
 - Open WebUI and Agentgateway host ports remain bound to loopback.
 - Agentgateway validates tenant, issuer, audience, expiry, and `llm.invoke` on
   every inference request.
